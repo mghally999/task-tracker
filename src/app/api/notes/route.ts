@@ -6,7 +6,8 @@ import { broadcast } from '@/lib/broadcast';
 export async function GET(request: Request) {
   const auth = authenticate(request);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  return NextResponse.json({ notes: store.getNotes() });
+  const notes = await store.getNotes();
+  return NextResponse.json({ notes });
 }
 
 export async function PUT(request: Request) {
@@ -14,7 +15,7 @@ export async function PUT(request: Request) {
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const body = await request.json();
-    const notes = store.updateNotes(body);
+    const notes = await store.updateNotes(body);
     broadcast({ type: 'notes_updated', payload: notes }, auth.userId);
     return NextResponse.json({ notes });
   } catch {

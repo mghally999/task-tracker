@@ -3,26 +3,25 @@ import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
+import { runMigrations } from './src/lib/migrate';
 import { store } from './src/lib/store';
+import { getPoolInstance } from './src/lib/db';
 import { JWT_SECRET } from './src/lib/auth';
 import type { AuthPayload, WSMessage } from './src/types';
 
-const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const dev  = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
+const host = '0.0.0.0'; // Required for Railway — binds to all interfaces
 
-const app = next({ dev, hostname, port });
-const handle = app.getRequestHandler();
-
-interface ExtendedWS extends WebSocket {
-  userId?: string;
+interface ExtWS extends WebSocket {
+  userId?:   string;
   userName?: string;
   userRole?: string;
   userColor?: string;
-  isAlive?: boolean;
+  isAlive?:  boolean;
 }
 
-// Global WSS accessible by API routes to broadcast changes
+// ─── Global WS accessor (used by broadcast.ts in API routes) ─────────────────
 declare global {
   var __wss: WebSocketServer | undefined;
 }
@@ -30,8 +29,8 @@ declare global {
 export function broadcast(msg: WSMessage, excludeUserId?: string): void {
   if (!global.__wss) return;
   const data = JSON.stringify(msg);
-  global.__wss.clients.forEach((client) => {
-    const ws = client as ExtendedWS;
+  global.__wss.clients.forEach((c) => {
+    const ws = c as ExtWS;
     if (ws.readyState === WebSocket.OPEN) {
       if (excludeUserId && ws.userId === excludeUserId) return;
       ws.send(data);
@@ -39,136 +38,122 @@ export function broadcast(msg: WSMessage, excludeUserId?: string): void {
   });
 }
 
-export function broadcastToAll(msg: WSMessage): void {
-  broadcast(msg);
-}
+// ─── Main ─────────────────────────────────────────────────────────────────────
+async function main() {
+  // 1. Run DB migrations (creates tables, seeds if empty)
+  console.log('\n[Boot] Running database migrations…');
+  await runMigrations();
 
-app.prepare().then(() => {
+  // 2. Load all data into in-memory cache
+  console.log('[Boot] Initializing task store…');
+  await store.initialize();
+
+  // 3. Boot Next.js
+  console.log('[Boot] Starting Next.js…');
+  const app    = next({ dev, hostname: host, port });
+  const handle = app.getRequestHandler();
+  await app.prepare();
+
+  // 4. Create HTTP server
   const httpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
     handle(req, res, parsedUrl);
   });
 
+  // 5. Attach WebSocket server
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   global.__wss = wss;
 
-  // Heartbeat interval
+  // Heartbeat — detect dead connections
   const heartbeat = setInterval(() => {
-    wss.clients.forEach((client) => {
-      const ws = client as ExtendedWS;
+    wss.clients.forEach((c) => {
+      const ws = c as ExtWS;
       if (ws.isAlive === false) { ws.terminate(); return; }
       ws.isAlive = false;
       ws.ping();
     });
-  }, 30000);
-
+  }, 30_000);
   wss.on('close', () => clearInterval(heartbeat));
 
   wss.on('connection', (rawWs) => {
-    const ws = rawWs as ExtendedWS;
+    const ws = rawWs as ExtWS;
     ws.isAlive = true;
     let authenticated = false;
-    let authTimeout: NodeJS.Timeout;
+
+    // Kill unauthenticated connections after 5 s
+    const authTimeout = setTimeout(() => {
+      if (!authenticated) ws.terminate();
+    }, 5_000);
 
     ws.on('pong', () => { ws.isAlive = true; });
 
-    authTimeout = setTimeout(() => {
-      if (!authenticated) ws.terminate();
-    }, 5000);
-
-    ws.on('message', (data) => {
+    ws.on('message', async (data) => {
       try {
         const msg: WSMessage = JSON.parse(data.toString());
 
-        // Authentication
+        // ── Authentication ──────────────────────────────────────────────────
         if (msg.type === 'auth') {
           try {
-            const decoded = jwt.verify(msg.payload.token, JWT_SECRET) as AuthPayload;
-            ws.userId = decoded.userId;
-            ws.userName = decoded.name;
-            ws.userRole = decoded.role;
+            const decoded = jwt.verify(msg.payload?.token, JWT_SECRET) as AuthPayload;
+            ws.userId    = decoded.userId;
+            ws.userName  = decoded.name;
+            ws.userRole  = decoded.role;
             ws.userColor = decoded.color;
             authenticated = true;
             clearTimeout(authTimeout);
 
-            // Send initial state
-            const tasks = store.getActiveTasks();
+            // Send full initial state
+            const tasks    = store.getActiveTasks();
             const archived = store.getArchivedTasks();
-            const notes = store.getNotes();
-            ws.send(JSON.stringify({
-              type: 'initial_state',
-              payload: { tasks, archived, notes },
-            }));
+            const notes    = await store.getNotes();
+            ws.send(JSON.stringify({ type: 'initial_state', payload: { tasks, archived, notes } }));
 
-            // Notify others
-            const joinMsg: WSMessage = {
+            // Tell others this user joined
+            broadcast({
               type: 'user_joined',
-              payload: {
-                userId: ws.userId,
-                userName: ws.userName,
-                userRole: ws.userRole,
-                color: ws.userColor,
-                connectedAt: Date.now(),
-              },
-            };
-            broadcast(joinMsg, ws.userId);
+              payload: { userId: ws.userId, userName: ws.userName, userRole: ws.userRole, color: ws.userColor, connectedAt: Date.now() },
+            }, ws.userId);
 
-            // Send current online users to this client
+            // Send current online users to the new client
             const onlineUsers: any[] = [];
             wss.clients.forEach((c) => {
-              const other = c as ExtendedWS;
+              const other = c as ExtWS;
               if (other !== ws && other.userId && other.readyState === WebSocket.OPEN) {
-                onlineUsers.push({
-                  userId: other.userId,
-                  userName: other.userName,
-                  userRole: other.userRole,
-                  color: other.userColor,
-                });
+                onlineUsers.push({ userId: other.userId, userName: other.userName, userRole: other.userRole, color: other.userColor });
               }
             });
             ws.send(JSON.stringify({ type: 'online_users', payload: onlineUsers }));
-            return;
           } catch {
             ws.send(JSON.stringify({ type: 'error', payload: { message: 'Invalid token' } }));
             ws.terminate();
-            return;
           }
+          return;
         }
 
-        if (!authenticated) { ws.send(JSON.stringify({ type: 'error', payload: { message: 'Not authenticated' } })); return; }
+        if (!authenticated) return;
 
-        // Cursor movement — broadcast to others only
+        // ── Cursor movement ─────────────────────────────────────────────────
         if (msg.type === 'cursor_move') {
           broadcast({
             type: 'cursor_move',
-            payload: {
-              userId: ws.userId,
-              userName: ws.userName,
-              userRole: ws.userRole,
-              color: ws.userColor,
-              x: msg.payload.x,
-              y: msg.payload.y,
-              lastSeen: Date.now(),
-            },
+            payload: { userId: ws.userId, userName: ws.userName, userRole: ws.userRole, color: ws.userColor, x: msg.payload?.x, y: msg.payload?.y, lastSeen: Date.now() },
           }, ws.userId);
           return;
         }
 
+        // ── Typing indicator ────────────────────────────────────────────────
+        if (msg.type === 'typing') {
+          broadcast({ type: 'typing', payload: { userId: ws.userId, userName: ws.userName, ...msg.payload } }, ws.userId);
+          return;
+        }
+
+        // ── Keepalive ───────────────────────────────────────────────────────
         if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong' }));
           return;
         }
-
-        // Typing indicator
-        if (msg.type === 'typing') {
-          broadcast({
-            type: 'typing',
-            payload: { userId: ws.userId, userName: ws.userName, taskId: msg.payload?.taskId, isTyping: msg.payload?.isTyping },
-          }, ws.userId);
-          return;
-        }
       } catch (err) {
-        console.error('WS message error:', err);
+        console.error('[WS] Message error:', err);
       }
     });
 
@@ -179,13 +164,37 @@ app.prepare().then(() => {
       }
     });
 
-    ws.on('error', (err) => console.error('WS error:', err));
+    ws.on('error', (err) => console.error('[WS] Socket error:', err.message));
   });
 
-  httpServer.listen(port, () => {
-    console.log(`\n🚀 CEO Executive Tracker ready on http://${hostname}:${port}`);
-    console.log(`📡 WebSocket server on ws://${hostname}:${port}/ws`);
-    console.log(`\n👔 CEO Login:       username: ceo       | password: ceo2026`);
-    console.log(`💼 Assistant Login: username: darlene   | password: assist2026\n`);
+  // 6. Start listening
+  httpServer.listen(port, host, () => {
+    console.log(`\n✅ CEO Executive Tracker running`);
+    console.log(`   Local:    http://localhost:${port}`);
+    console.log(`   Network:  http://${host}:${port}`);
+    console.log(`   WS:       ws://localhost:${port}/ws`);
+    console.log(`\n   👔 CEO:       ceo  / ${process.env.CEO_PASSWORD || 'ceo2026'}`);
+    console.log(`   💼 Assistant: darlene / ${process.env.ASSISTANT_PASSWORD || 'assist2026'}\n`);
   });
+
+  // 7. Graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('[Shutdown] SIGTERM received — closing gracefully…');
+    wss.close();
+    clearInterval(heartbeat);
+    await getPoolInstance().end();
+    process.exit(0);
+  });
+  process.on('SIGINT', async () => {
+    console.log('[Shutdown] SIGINT received — closing gracefully…');
+    wss.close();
+    clearInterval(heartbeat);
+    await getPoolInstance().end();
+    process.exit(0);
+  });
+}
+
+main().catch((err) => {
+  console.error('[Boot] Fatal error:', err);
+  process.exit(1);
 });

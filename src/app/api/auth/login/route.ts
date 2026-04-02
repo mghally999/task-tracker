@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { USERS, signToken } from '@/lib/auth';
+import { validateUser, signToken } from '@/lib/auth';
 
 export async function POST(request: Request) {
   try {
     const { username, password } = await request.json();
-    const user = USERS[username?.toLowerCase()];
-    if (!user || user.password !== password) {
+    const user = validateUser(username, password);
+    if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
     const token = signToken({ userId: user.id, role: user.role, name: user.name, color: user.color });
@@ -14,8 +14,11 @@ export async function POST(request: Request) {
       token,
     });
     res.cookies.set('token', token, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', maxAge: 60 * 60 * 12, path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 12,
+      path: '/',
     });
     return res;
   } catch {
