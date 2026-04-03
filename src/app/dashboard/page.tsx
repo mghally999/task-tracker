@@ -10,30 +10,24 @@ import { CommentPanel } from '@/components/CommentPanel';
 import { LiveCursors } from '@/components/LiveCursors';
 import { CEODashboard } from '@/components/CEODashboard';
 import { AssistantDashboard } from '@/components/AssistantDashboard';
+import { PDFButton } from '@/components/PDFExport';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [dark, setDark] = useState(true);
+  const [user, setUser]     = useState<User | null>(null);
+  const [token, setToken]   = useState<string | null>(null);
+  const [dark, setDark]     = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [view, setView] = useState<'full' | 'ceo'>('full');
+  const [view, setView]     = useState<'full' | 'ceo'>('full');
 
-  // Modal states
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm]     = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [commentTask, setCommentTask] = useState<Task | null>(null);
+  const [filters, setFilters]       = useState<TaskFilters>({});
 
-  // Filters
-  const [filters, setFilters] = useState<TaskFilters>({});
-
-  // Tasks
   const tasksMgr = useTasks();
+  const ws       = useWebSocket(token);
 
-  // WebSocket
-  const ws = useWebSocket(token);
-
-  // Toast
   const [toasts, setToasts] = useState<{ id: string; msg: string; type: 'success' | 'error' }[]>([]);
   const toast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     const id = Math.random().toString(36).slice(2);
@@ -41,7 +35,6 @@ export default function DashboardPage() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
 
-  // Init theme and auth
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
     const isDark = savedTheme !== 'light';
@@ -49,7 +42,6 @@ export default function DashboardPage() {
     document.documentElement.classList.toggle('dark', isDark);
     setMounted(true);
 
-    // Auth check
     (async () => {
       try {
         const res = await fetch('/api/auth/me');
@@ -57,26 +49,16 @@ export default function DashboardPage() {
         const data = await res.json();
         setUser(data.user);
         setToken(data.token || document.cookie.match(/token=([^;]+)/)?.[1] || null);
-
-        // Default view
-        if (data.user.role === 'ceo') setView('ceo');
-      } catch {
-        router.push('/login');
-      }
+        // CEO defaults to CEO view, assistant to full view
+        setView(data.user.role === 'ceo' ? 'ceo' : 'full');
+      } catch { router.push('/login'); }
     })();
   }, [router]);
 
-  // Initial data load
-  useEffect(() => {
-    if (user) tasksMgr.fetchTasks(filters);
-  }, [user]);
+  useEffect(() => { if (user) tasksMgr.fetchTasks(filters); }, [user]);
+  useEffect(() => { if (user) tasksMgr.fetchTasks(filters); }, [filters]);
 
-  // Refetch on filter change
-  useEffect(() => {
-    if (user) tasksMgr.fetchTasks(filters);
-  }, [filters]);
-
-  // WebSocket event handlers
+  // WS events
   useEffect(() => {
     const unsubs = [
       ws.on('initial_state', (payload) => {
@@ -88,7 +70,6 @@ export default function DashboardPage() {
       ws.on('task_deleted', (payload) => { tasksMgr.applyWSEvent('task_deleted', payload); }),
       ws.on('comment_added', (payload) => {
         tasksMgr.applyWSEvent('comment_added', payload);
-        // Update comment panel if open
         if (commentTask?.id === payload?.taskId) {
           setCommentTask(prev => prev ? { ...prev, comments: [...(prev.comments || []), payload.comment] } : null);
         }
@@ -98,7 +79,6 @@ export default function DashboardPage() {
     return () => unsubs.forEach(fn => fn && fn());
   }, [ws.on, commentTask]);
 
-  // Sync commentTask with live task data
   useEffect(() => {
     if (commentTask) {
       const live = [...tasksMgr.tasks, ...tasksMgr.archivedTasks].find(t => t.id === commentTask.id);
@@ -106,8 +86,6 @@ export default function DashboardPage() {
     }
   }, [tasksMgr.tasks, tasksMgr.archivedTasks]);
 
-  // Cursor tracking
-  const pageRef = useRef<HTMLDivElement>(null);
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     ws.sendCursor(e.clientX, e.clientY);
   }, [ws.sendCursor]);
@@ -124,21 +102,18 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // Task CRUD handlers
+  // ── Task handlers ──────────────────────────────────────────────────────────
   const handleSaveTask = async (data: Partial<Task>) => {
     try {
       if (editingTask) {
         await tasksMgr.updateTask(editingTask.id, data);
-        toast('Task updated');
+        toast('Task updated ✓');
       } else {
         await tasksMgr.createTask(data);
-        toast('Task created');
+        toast('Task created ✓');
       }
-      setEditingTask(null);
-      setShowForm(false);
-    } catch {
-      toast('Failed to save task', 'error');
-    }
+      setEditingTask(null); setShowForm(false);
+    } catch { toast('Failed to save task', 'error'); }
   };
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
@@ -152,7 +127,7 @@ export default function DashboardPage() {
   };
 
   const handleRestore = async (id: string) => {
-    try { await tasksMgr.restoreTask(id); toast('Task restored'); }
+    try { await tasksMgr.restoreTask(id); toast('Task restored ✓'); }
     catch { toast('Failed to restore', 'error'); }
   };
 
@@ -172,13 +147,12 @@ export default function DashboardPage() {
 
   if (!mounted || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center"
-        style={{ background: dark ? '#070c14' : '#f0f4f8' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: dark ? '#070c14' : '#f0f4f8' }}>
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-bold"
             style={{ background: 'linear-gradient(135deg,#163a63,#244f80)' }}>ET</div>
           <div className="flex gap-1">
-            {[0,1,2].map(i => (
+            {[0, 1, 2].map(i => (
               <div key={i} className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
             ))}
           </div>
@@ -187,43 +161,56 @@ export default function DashboardPage() {
     );
   }
 
+  // Shared edit props passed to both CEO and Assistant dashboards
+  const editProps = {
+    onStatusChange: handleStatusChange,
+    onEdit: (task: Task) => { setEditingTask(task); setShowForm(true); },
+    onArchive: handleArchive,
+    onRestore: handleRestore,
+    onDelete: handleDelete,
+    onComment: (task: Task) => setCommentTask(task),
+    onNewTask: () => { setEditingTask(null); setShowForm(true); },
+    onNotesChange: handleNotesChange,
+  };
+
   return (
-    <div
-      ref={pageRef}
-      className="min-h-screen"
-      style={{ background: dark ? '#070c14' : '#f0f4f8' }}
-      onMouseMove={handleMouseMove}
-    >
-      {/* Navbar */}
-      <Navbar
-        user={user}
-        onlineUsers={ws.onlineUsers}
-        connected={ws.connected}
-        dark={dark}
-        onToggleTheme={toggleTheme}
-        onLogout={handleLogout}
-        view={view}
-        onToggleView={() => setView(v => v === 'full' ? 'ceo' : 'full')}
-      />
+    <div className="min-h-screen" style={{ background: dark ? '#070c14' : '#f0f4f8' }} onMouseMove={handleMouseMove}>
 
-      {/* Main content */}
-      <main className="max-w-[1600px] mx-auto px-6 py-6">
+      {/* Navbar with PDF button */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <Navbar
+            user={user} onlineUsers={ws.onlineUsers} connected={ws.connected}
+            dark={dark} onToggleTheme={toggleTheme} onLogout={handleLogout}
+            view={view} onToggleView={() => setView(v => v === 'full' ? 'ceo' : 'full')}
+          />
+        </div>
+      </div>
 
-        {/* CEO view */}
+      {/* PDF button — floats top right below navbar */}
+      <div className="fixed top-16 right-6 z-30">
+        <PDFButton
+          tasks={tasksMgr.tasks}
+          archivedTasks={tasksMgr.archivedTasks}
+          notes={tasksMgr.notes}
+          userName={user.name}
+          dark={dark}
+        />
+      </div>
+
+      <main className="max-w-[1600px] mx-auto px-6 py-6 pt-8">
         {view === 'ceo' && (
           <CEODashboard
             tasks={tasksMgr.tasks}
+            archivedTasks={tasksMgr.archivedTasks}
             stats={tasksMgr.stats}
             notes={tasksMgr.notes}
             currentUser={user}
             onlineUsers={ws.onlineUsers}
             dark={dark}
-            onComment={(task) => setCommentTask(task)}
-            onStatusChange={handleStatusChange}
+            {...editProps}
           />
         )}
-
-        {/* Full assistant view */}
         {view === 'full' && (
           <AssistantDashboard
             tasks={tasksMgr.tasks}
@@ -234,61 +221,38 @@ export default function DashboardPage() {
             dark={dark}
             filters={filters}
             onFiltersChange={setFilters}
-            onStatusChange={handleStatusChange}
-            onEdit={(task) => { setEditingTask(task); setShowForm(true); }}
-            onArchive={handleArchive}
-            onRestore={handleRestore}
-            onDelete={handleDelete}
-            onComment={(task) => setCommentTask(task)}
-            onNewTask={() => { setEditingTask(null); setShowForm(true); }}
-            onNotesChange={handleNotesChange}
+            {...editProps}
           />
         )}
       </main>
 
-      {/* Task Form Modal */}
       {showForm && (
-        <TaskForm
-          task={editingTask}
-          onSave={handleSaveTask}
-          onClose={() => { setShowForm(false); setEditingTask(null); }}
-          dark={dark}
-        />
+        <TaskForm task={editingTask} onSave={handleSaveTask}
+          onClose={() => { setShowForm(false); setEditingTask(null); }} dark={dark} />
       )}
 
-      {/* Comment Panel */}
-      <CommentPanel
-        task={commentTask}
-        currentUser={user}
-        onClose={() => setCommentTask(null)}
-        onAddComment={handleAddComment}
-        dark={dark}
-      />
+      <CommentPanel task={commentTask} currentUser={user}
+        onClose={() => setCommentTask(null)} onAddComment={handleAddComment} dark={dark} />
 
-      {/* Live Cursors */}
       <LiveCursors cursors={ws.cursors} currentUserId={user.id} />
 
-      {/* Toast notifications */}
+      {/* Toasts */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9998] flex flex-col gap-2 items-center pointer-events-none">
         {toasts.map(t => (
-          <div key={t.id}
-            className="px-5 py-3 rounded-2xl text-sm font-semibold shadow-xl animate-slide-up"
+          <div key={t.id} className="px-5 py-3 rounded-2xl text-sm font-semibold shadow-xl animate-slide-up"
             style={{
-              background: t.type === 'success' ? (dark ? 'rgba(22,101,52,0.9)' : '#166534') : (dark ? 'rgba(153,27,27,0.9)' : '#991b1b'),
-              color: '#fff',
-              backdropFilter: 'blur(12px)',
-              border: `1px solid ${t.type === 'success' ? 'rgba(134,239,172,0.3)' : 'rgba(252,165,165,0.3)'}`,
+              background: t.type === 'success' ? (dark ? 'rgba(22,101,52,0.95)' : '#166534') : (dark ? 'rgba(153,27,27,0.95)' : '#991b1b'),
+              color: '#fff', backdropFilter: 'blur(12px)',
             }}>
             {t.type === 'success' ? '✓ ' : '✕ '}{t.msg}
           </div>
         ))}
       </div>
 
-      {/* Connection lost banner */}
       {!ws.connected && (
         <div className="fixed top-16 left-0 right-0 z-40 flex justify-center pointer-events-none">
           <div className="px-4 py-2 rounded-full text-xs font-semibold"
-            style={{ background: 'rgba(239,68,68,0.9)', color: '#fff', backdropFilter: 'blur(8px)' }}>
+            style={{ background: 'rgba(239,68,68,0.9)', color: '#fff' }}>
             ⚠️ Reconnecting…
           </div>
         </div>
