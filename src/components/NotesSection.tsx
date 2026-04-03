@@ -11,15 +11,15 @@ interface Props {
 }
 
 export function NotesSection({ notes, date, onChange, dark, readOnly }: Props) {
-  const [summary, setSummary]     = useState(notes.summary || '');
-  const [tomorrow, setTomorrow]   = useState(notes.tomorrow || '');
-  const [saving, setSaving]       = useState(false);
-  const [savedAt, setSavedAt]     = useState('');
+  const [summary,  setSummary]  = useState(notes.summary  || '');
+  const [tomorrow, setTomorrow] = useState(notes.tomorrow || '');
+  const [saving,   setSaving]   = useState(false);
+  const [savedAt,  setSavedAt]  = useState('');
   const [showSaved, setShowSaved] = useState(false);
   const autoTimer = useRef<NodeJS.Timeout>();
 
-  useEffect(() => { setSummary(notes.summary || ''); }, [notes.summary]);
-  useEffect(() => { setTomorrow(notes.tomorrow || ''); }, [notes.tomorrow]);
+  useEffect(() => { setSummary(notes.summary   || ''); }, [notes.summary]);
+  useEffect(() => { setTomorrow(notes.tomorrow  || ''); }, [notes.tomorrow]);
 
   const doSave = async (s: string, t: string) => {
     setSaving(true);
@@ -42,33 +42,30 @@ export function NotesSection({ notes, date, onChange, dark, readOnly }: Props) {
   const box = {
     background: dark ? 'rgba(17,24,39,0.8)' : '#fff',
     border: `1px solid ${dark ? 'rgba(255,255,255,0.07)' : '#e2e8f0'}`,
-    borderRadius: '16px', padding: '20px',
+    borderRadius: '16px', padding: '18px 20px',
     boxShadow: dark ? '0 4px 20px rgba(0,0,0,0.2)' : '0 2px 8px rgba(13,27,42,0.06)',
   };
 
   const ta = {
     background: 'transparent', border: 'none', padding: 0,
     resize: 'none' as const, outline: 'none', fontFamily: 'inherit',
-    color: dark ? '#cbd5e1' : '#334155', fontSize: '14px',
-    lineHeight: '1.7', width: '100%',
+    color: dark ? '#cbd5e1' : '#334155', fontSize: '15px', lineHeight: '1.7', width: '100%',
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display font-bold text-base" style={{ color: dark ? '#f1f5f9' : '#0d1b2a' }}>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 className="font-display font-bold text-lg" style={{ color: dark ? '#f1f5f9' : '#0d1b2a' }}>
           📝 Daily Notes
         </h2>
         {!readOnly && (
           <div className="flex items-center gap-3">
             {showSaved && (
-              <span className="text-xs font-semibold" style={{ color: '#22c55e', fontFamily: 'monospace' }}>
-                ✓ Saved at {savedAt}
-              </span>
+              <span className="text-sm font-semibold" style={{ color: '#22c55e', fontFamily: 'monospace' }}>✓ Saved {savedAt}</span>
             )}
             <button onClick={() => { clearTimeout(autoTimer.current); doSave(summary, tomorrow); }}
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60 hover:scale-[1.02] transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60 hover:scale-[1.02] transition-all"
               style={{ background: showSaved ? 'linear-gradient(135deg,#166534,#15803d)' : 'linear-gradient(135deg,#163a63,#244f80)' }}>
               {saving ? <><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Saving…</>
                 : showSaved ? '✓ Saved!' : '💾 Save Notes'}
@@ -76,13 +73,12 @@ export function NotesSection({ notes, date, onChange, dark, readOnly }: Props) {
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div style={box}>
           <div className="flex items-center gap-2 mb-3">
-            <span>📋</span>
-            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: dark ? '#64748b' : '#94a3b8' }}>
-              End-of-Day Summary
-            </h3>
+            <span className="text-lg">📋</span>
+            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: dark ? '#64748b' : '#94a3b8' }}>End-of-Day Summary</h3>
           </div>
           {readOnly
             ? <p className="text-sm leading-relaxed min-h-[80px]" style={{ color: dark ? '#94a3b8' : '#64748b', whiteSpace: 'pre-wrap' }}>
@@ -99,10 +95,8 @@ export function NotesSection({ notes, date, onChange, dark, readOnly }: Props) {
         </div>
         <div style={box}>
           <div className="flex items-center gap-2 mb-3">
-            <span>🎯</span>
-            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: dark ? '#64748b' : '#94a3b8' }}>
-              Tomorrow's Priorities
-            </h3>
+            <span className="text-lg">🎯</span>
+            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: dark ? '#64748b' : '#94a3b8' }}>Tomorrow's Priorities</h3>
           </div>
           {readOnly
             ? <p className="text-sm leading-relaxed min-h-[80px]" style={{ color: dark ? '#94a3b8' : '#64748b', whiteSpace: 'pre-wrap' }}>

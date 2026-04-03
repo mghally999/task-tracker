@@ -188,12 +188,12 @@ export default function DashboardPage() {
         chatUnread={chatUnread} />
 
       {/* PDF button */}
-      <div className="fixed top-16 right-6 z-30 mt-2">
+      <div className="fixed top-16 right-3 sm:right-6 z-30 mt-2">
         <PDFButton tasks={tasksMgr.tasks} archivedTasks={tasksMgr.archivedTasks}
           notes={notes} userName={user.name} dark={dark} />
       </div>
 
-      <main className="max-w-[1600px] mx-auto px-6 py-6 pt-8">
+      <main className="max-w-[1600px] mx-auto px-3 sm:px-6 py-4 sm:py-6 pt-4 sm:pt-8">
         {/* Date banner for past days */}
         {selectedDate !== today && (
           <div className="mb-4 flex items-center gap-3 px-5 py-3 rounded-2xl"
