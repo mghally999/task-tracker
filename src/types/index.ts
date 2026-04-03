@@ -1,16 +1,9 @@
 export type Priority = 'High' | 'Medium' | 'Low';
 export type TaskStatus = 'pending' | 'progress' | 'done' | 'hold';
 export type Category =
-  | 'CEO Meeting'
-  | 'Follow-up'
-  | 'Approval'
-  | 'Travel'
-  | 'Communication'
-  | 'Confidential'
-  | 'Personal Assistance'
-  | 'PRO & Compliance';
-
-export type UserRole = 'ceo' | 'assistant';
+  | 'CEO Meeting' | 'Follow-up' | 'Approval' | 'Travel'
+  | 'Communication' | 'Confidential' | 'Personal Assistance' | 'PRO & Compliance';
+export type UserRole = 'mohammed' | 'darlene';
 
 export interface User {
   id: string;
@@ -28,7 +21,6 @@ export interface Comment {
   userRole: UserRole;
   text: string;
   createdAt: string;
-  editedAt?: string;
 }
 
 export interface Task {
@@ -49,9 +41,19 @@ export interface Task {
   pinned: boolean;
 }
 
-export interface DashboardNotes {
+export interface DailyNotes {
+  date: string;
   summary: string;
   tomorrow: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  text: string;
+  createdAt: string;
 }
 
 export interface CursorData {
@@ -72,21 +74,12 @@ export interface OnlineUser {
 }
 
 export type WSEventType =
-  | 'auth'
-  | 'initial_state'
-  | 'online_users'
-  | 'task_created'
-  | 'task_updated'
-  | 'task_deleted'
-  | 'comment_added'
-  | 'cursor_move'
-  | 'user_joined'
-  | 'user_left'
-  | 'notes_updated'
-  | 'typing'
-  | 'ping'
-  | 'pong'
-  | 'error';
+  | 'auth' | 'initial_state' | 'online_users'
+  | 'task_created' | 'task_updated' | 'task_deleted'
+  | 'comment_added' | 'cursor_move'
+  | 'user_joined' | 'user_left'
+  | 'notes_updated' | 'chat_message'
+  | 'typing' | 'ping' | 'pong' | 'error';
 
 export interface WSMessage {
   type: WSEventType;
@@ -101,16 +94,6 @@ export interface AuthPayload {
   color: string;
   iat?: number;
   exp?: number;
-}
-
-export interface DashboardStats {
-  total: number;
-  high: number;
-  done: number;
-  inProgress: number;
-  pendingOrWaiting: number;
-  confidential: number;
-  overdue: number;
 }
 
 export interface TaskFilters {

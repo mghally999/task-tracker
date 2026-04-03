@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import type { Task, User, OnlineUser, DashboardNotes, TaskStatus } from '@/types';
+import type { Task, User, OnlineUser, DailyNotes, TaskStatus } from '@/types';
 import { StatsBar } from './StatsBar';
 import { TaskRow } from './TaskRow';
 import { NotesSection } from './NotesSection';
@@ -10,7 +10,8 @@ interface Props {
   tasks: Task[];
   archivedTasks: Task[];
   stats: Record<string, number>;
-  notes: DashboardNotes;
+  notes: DailyNotes;
+  selectedDate: string;
   currentUser: User;
   onlineUsers: OnlineUser[];
   dark: boolean;
@@ -21,14 +22,16 @@ interface Props {
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onNewTask: () => void;
-  onNotesChange: (updates: Partial<DashboardNotes>) => void;
+  onNotesChange: (date: string, updates: Partial<DailyNotes>) => void;
 }
 
 export function CEODashboard({
-  tasks, archivedTasks, stats, notes, currentUser, onlineUsers, dark,
+  tasks, archivedTasks, stats, notes, selectedDate, currentUser, onlineUsers, dark,
   onComment, onStatusChange, onEdit, onArchive, onRestore, onDelete, onNewTask, onNotesChange,
 }: Props) {
   const [activeTab, setActiveTab] = useState<'all' | 'priority' | 'archived'>('all');
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = selectedDate === today;
 
   const active = tasks.filter(t => !t.archived);
   const high   = active.filter(t => t.priority === 'High');
@@ -58,7 +61,6 @@ export function CEODashboard({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Online banner */}
       {onlineUsers.filter(u => u.userId !== currentUser.id).length > 0 && (
         <div className="flex items-center gap-3 px-5 py-3 rounded-2xl"
           style={{ background: dark ? 'rgba(34,197,94,0.08)' : '#f0fdf4', border: `1px solid ${dark ? 'rgba(34,197,94,0.2)' : '#86efac'}` }}>
@@ -71,7 +73,6 @@ export function CEODashboard({
 
       <StatsBar stats={stats} dark={dark} />
 
-      {/* Priority summary cards */}
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: 'High Priority', list: high, color: '#ef4444', icon: '🔴' },
@@ -100,12 +101,15 @@ export function CEODashboard({
         })}
       </div>
 
-      {/* Main panel */}
       <div style={card}>
         <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
           <div>
-            <h2 className="font-display font-bold text-lg" style={{ color: dark ? '#f1f5f9' : '#0d1b2a' }}>CEO Priority Dashboard</h2>
-            <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#94a3b8' }}>Full control — edit, update, archive, delete & comment on any task</p>
+            <h2 className="font-display font-bold text-lg" style={{ color: dark ? '#f1f5f9' : '#0d1b2a' }}>
+              {isToday ? 'Today\'s Dashboard' : `Tasks for ${selectedDate}`}
+            </h2>
+            <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#94a3b8' }}>
+              {isToday ? 'Full control — edit, archive, delete & comment on any task' : 'Viewing past day — all actions available'}
+            </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f1f5f9' }}>
@@ -114,13 +118,10 @@ export function CEODashboard({
               <button style={tabStyle(activeTab === 'archived')} onClick={() => setActiveTab('archived')}>Archive</button>
             </div>
             <button onClick={onNewTask} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white"
-              style={{ background: 'linear-gradient(135deg,#163a63,#244f80)' }}>
-              ✨ New Task
-            </button>
+              style={{ background: 'linear-gradient(135deg,#163a63,#244f80)' }}>✨ New Task</button>
           </div>
         </div>
 
-        {/* Legend */}
         <div className="flex items-center gap-4 mb-4 text-xs">
           {[{ color: '#ef4444', label: 'High' }, { color: '#f59e0b', label: 'Medium' }, { color: '#22c55e', label: 'Low' }].map(({ color, label }) => (
             <div key={label} className="flex items-center gap-1.5">
@@ -128,13 +129,12 @@ export function CEODashboard({
               <span style={{ color: dark ? '#64748b' : '#94a3b8' }}>{label}</span>
             </div>
           ))}
-          <span className="ml-auto text-xs" style={{ color: dark ? '#475569' : '#94a3b8' }}>Hover a row for edit/delete actions</span>
+          <span className="ml-auto text-xs" style={{ color: dark ? '#475569' : '#94a3b8' }}>Hover row for actions</span>
         </div>
 
-        {/* ALL TASKS */}
         {activeTab === 'all' && (
           active.length === 0
-            ? <div className="text-center py-16"><div className="text-5xl mb-4">📋</div><p style={{ color: dark ? '#475569' : '#94a3b8' }}>No active tasks</p></div>
+            ? <div className="text-center py-16"><div className="text-5xl mb-4">📋</div><p style={{ color: dark ? '#475569' : '#94a3b8' }}>No active tasks{!isToday ? ' for this date' : ''}</p></div>
             : active.map(task => (
                 <TaskRow key={task.id} task={task} currentUser={currentUser} canEdit={true} dark={dark}
                   onStatusChange={onStatusChange} onEdit={onEdit} onArchive={onArchive}
@@ -142,7 +142,6 @@ export function CEODashboard({
               ))
         )}
 
-        {/* PRIORITY GROUPS */}
         {activeTab === 'priority' && (['High', 'Medium', 'Low'] as const).map(p => {
           const group = active.filter(t => t.priority === p);
           if (!group.length) return null;
@@ -164,7 +163,6 @@ export function CEODashboard({
           );
         })}
 
-        {/* ARCHIVE */}
         {activeTab === 'archived' && (
           <div>
             <div className="mb-4 px-4 py-3 rounded-xl text-sm"
@@ -183,8 +181,7 @@ export function CEODashboard({
         )}
       </div>
 
-      {/* Notes */}
-      <NotesSection notes={notes} onChange={onNotesChange} dark={dark} />
+      <NotesSection notes={notes} date={selectedDate} onChange={onNotesChange} dark={dark} />
     </div>
   );
 }

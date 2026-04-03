@@ -1,6 +1,11 @@
 {
-  "/api/tasks/route": "app/api/tasks/route.js",
-  "/dashboard/page": "app/dashboard/page.js",
   "/api/auth/me/route": "app/api/auth/me/route.js",
-  "/page": "app/page.js"
+  "/dashboard/page": "app/dashboard/page.js",
+  "/login/page": "app/login/page.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/tasks/route": "app/api/tasks/route.js",
+  "/api/notes/route": "app/api/notes/route.js",
+  "/api/auth/logout/route": "app/api/auth/logout/route.js",
+  "/api/chat/route": "app/api/chat/route.js",
+  "/api/calendar/route": "app/api/calendar/route.js"
 }

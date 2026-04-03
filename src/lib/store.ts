@@ -3,7 +3,7 @@ import { query } from './db';
 import { HashMap } from './ds/HashMap';
 import { MinHeap } from './ds/MinHeap';
 import { Trie } from './ds/Trie';
-import type { Task, Comment, Priority, TaskStatus, TaskFilters, DashboardNotes } from '../types';
+import type { Task, Comment, Priority, TaskStatus, TaskFilters, DailyNotes, ChatMessage } from '../types';
 
 const PRIORITY_ORDER: Record<Priority, number> = { High: 0, Medium: 1, Low: 2 };
 
@@ -40,48 +40,29 @@ function rowToComment(row: any): Comment {
 }
 
 export class TaskStore {
-  // L1 write-through cache — O(1) reads
   private cache      = new HashMap<Task>(64);
   private trie       = new Trie();
   private byPriority = new HashMap<Set<string>>();
   private byStatus   = new HashMap<Set<string>>();
   private byCategory = new HashMap<Set<string>>();
-  private _notes: DashboardNotes = { summary: '', tomorrow: '' };
-  private _notesLoaded = false;
   private initialized = false;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
     console.log('[Store] Loading from database…');
-
     const taskRows = await query<any>(`
       SELECT t.*,
-        COALESCE(
-          json_agg(
-            json_build_object(
-              'id', c.id, 'task_id', c.task_id,
-              'user_id', c.user_id, 'user_name', c.user_name,
-              'user_role', c.user_role, 'text', c.text,
-              'created_at', c.created_at
-            ) ORDER BY c.created_at
-          ) FILTER (WHERE c.id IS NOT NULL),
-          '[]'
-        ) AS comments_json
-      FROM tasks t
-      LEFT JOIN comments c ON c.task_id = t.id
-      GROUP BY t.id
-      ORDER BY t.created_at DESC
+        COALESCE(json_agg(json_build_object(
+          'id',c.id,'task_id',c.task_id,'user_id',c.user_id,
+          'user_name',c.user_name,'user_role',c.user_role,
+          'text',c.text,'created_at',c.created_at
+        ) ORDER BY c.created_at) FILTER (WHERE c.id IS NOT NULL),'[]') AS comments_json
+      FROM tasks t LEFT JOIN comments c ON c.task_id=t.id
+      GROUP BY t.id ORDER BY t.created_at DESC
     `);
-
     for (const row of taskRows) {
-      const comments = (row.comments_json || []).map(rowToComment);
-      this._addToCache(rowToTask(row, comments));
+      this._addToCache(rowToTask(row, (row.comments_json || []).map(rowToComment)));
     }
-
-    const noteRows = await query<{ key: string; value: string }>('SELECT key, value FROM notes');
-    noteRows.forEach(r => { (this._notes as any)[r.key] = r.value; });
-    this._notesLoaded = true;
-
     console.log(`[Store] Loaded ${this.cache.size} tasks ✓`);
     this.initialized = true;
   }
@@ -90,7 +71,7 @@ export class TaskStore {
     this.cache.set(task.id, task);
     this.trie.indexTask(task);
     this._idx(this.byPriority, task.priority, task.id);
-    this._idx(this.byStatus, task.status, task.id);
+    this._idx(this.byStatus,   task.status,   task.id);
     this._idx(this.byCategory, task.category, task.id);
   }
 
@@ -107,20 +88,16 @@ export class TaskStore {
     map.get(key)!.add(id);
   }
 
-  // ── CRUD ───────────────────────────────────────────────────────────────────
-
   async getTask(id: string): Promise<Task | undefined> { return this.cache.get(id); }
 
   async createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'comments' | 'pinned'>): Promise<Task> {
     const id = `t-${uuidv4()}`;
     const now = new Date().toISOString();
     const rows = await query<any>(
-      `INSERT INTO tasks
-         (id,date,name,category,priority,status,time,owner,notes,archived,archived_on,pinned,created_at,updated_at)
+      `INSERT INTO tasks (id,date,name,category,priority,status,time,owner,notes,archived,archived_on,pinned,created_at,updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$12) RETURNING *`,
-      [id, data.date, data.name, data.category, data.priority, data.status,
-       data.time||'', data.owner||'', data.notes||'',
-       data.archived||false, data.archivedOn||null, now]
+      [id,data.date,data.name,data.category,data.priority,data.status,
+       data.time||'',data.owner||'',data.notes||'',data.archived||false,data.archivedOn||null,now]
     );
     const task = rowToTask(rows[0], []);
     this._addToCache(task);
@@ -133,13 +110,8 @@ export class TaskStore {
     const now = new Date().toISOString();
     const m = { ...existing, ...updates, id, updatedAt: now, comments: existing.comments };
     await query(
-      `UPDATE tasks SET
-         date=$2,name=$3,category=$4,priority=$5,status=$6,
-         time=$7,owner=$8,notes=$9,archived=$10,archived_on=$11,
-         pinned=$12,updated_at=$13
-       WHERE id=$1`,
-      [id, m.date, m.name, m.category, m.priority, m.status,
-       m.time, m.owner, m.notes, m.archived, m.archivedOn||null, m.pinned, now]
+      `UPDATE tasks SET date=$2,name=$3,category=$4,priority=$5,status=$6,time=$7,owner=$8,notes=$9,archived=$10,archived_on=$11,pinned=$12,updated_at=$13 WHERE id=$1`,
+      [id,m.date,m.name,m.category,m.priority,m.status,m.time,m.owner,m.notes,m.archived,m.archivedOn||null,m.pinned,now]
     );
     this._removeFromCache(existing);
     this._addToCache(m);
@@ -166,22 +138,18 @@ export class TaskStore {
     return this.updateTask(id, { pinned });
   }
 
-  // ── Queries ────────────────────────────────────────────────────────────────
-
-  getActiveTasks(): Task[]  { return this.cache.values().filter(t => !t.archived); }
+  getAllTasks(): Task[]    { return this.cache.values(); }
+  getActiveTasks(): Task[] { return this.cache.values().filter(t => !t.archived); }
   getArchivedTasks(): Task[] { return this.cache.values().filter(t => t.archived); }
 
   filterTasks(filters: TaskFilters): Task[] {
     let candidates: Set<string> | null = null;
-
     if (filters.search?.trim()?.length! >= 2) {
       candidates = this.trie.searchMultiple(filters.search!);
     }
-
     const intersect = (ids: Set<string>) => {
       candidates = candidates ? this._intersect(candidates, ids) : new Set(ids);
     };
-
     if (filters.priority) intersect(this.byPriority.get(filters.priority) || new Set());
     if (filters.status)   intersect(this.byStatus.get(filters.status)     || new Set());
     if (filters.category) intersect(this.byCategory.get(filters.category) || new Set());
@@ -193,7 +161,6 @@ export class TaskStore {
     tasks = tasks.filter(t => filters.archived === true ? t.archived : !t.archived);
     if (filters.dateFrom) tasks = tasks.filter(t => t.date >= filters.dateFrom!);
     if (filters.dateTo)   tasks = tasks.filter(t => t.date <= filters.dateTo!);
-
     return MinHeap.fromArray(tasks, taskComparator).toSortedArray();
   }
 
@@ -204,14 +171,11 @@ export class TaskStore {
     return out;
   }
 
-  // ── Comments ───────────────────────────────────────────────────────────────
-
   async addComment(taskId: string, data: Omit<Comment, 'id' | 'createdAt'>): Promise<Comment | undefined> {
     const task = this.cache.get(taskId);
     if (!task) return undefined;
     const rows = await query<any>(
-      `INSERT INTO comments (id,task_id,user_id,user_name,user_role,text)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO comments (id,task_id,user_id,user_name,user_role,text) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [`c-${uuidv4()}`, taskId, data.userId, data.userName, data.userRole, data.text]
     );
     const comment = rowToComment(rows[0]);
@@ -221,23 +185,56 @@ export class TaskStore {
 
   getComments(taskId: string): Comment[] { return this.cache.get(taskId)?.comments || []; }
 
-  // ── Notes ──────────────────────────────────────────────────────────────────
-
-  async getNotes(): Promise<DashboardNotes> { return this._notes; }
-
-  async updateNotes(updates: Partial<DashboardNotes>): Promise<DashboardNotes> {
-    this._notes = { ...this._notes, ...updates };
-    for (const [key, value] of Object.entries(updates)) {
-      await query(
-        `INSERT INTO notes (key,value,updated_at) VALUES ($1,$2,NOW())
-         ON CONFLICT (key) DO UPDATE SET value=$2,updated_at=NOW()`,
-        [key, value]
-      );
-    }
-    return this._notes;
+  // ── Daily Notes (keyed by date) ─────────────────────────────────────────────
+  async getNotes(date?: string): Promise<DailyNotes> {
+    const d = date || todayStr();
+    const rows = await query<any>('SELECT * FROM daily_notes WHERE date=$1', [d]);
+    if (rows.length) return { date: rows[0].date, summary: rows[0].summary, tomorrow: rows[0].tomorrow };
+    return { date: d, summary: '', tomorrow: '' };
   }
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
+  async updateNotes(date: string, updates: Partial<DailyNotes>): Promise<DailyNotes> {
+    const current = await this.getNotes(date);
+    const merged = { ...current, ...updates, date };
+    await query(
+      `INSERT INTO daily_notes (date,summary,tomorrow,updated_at) VALUES ($1,$2,$3,NOW())
+       ON CONFLICT (date) DO UPDATE SET summary=$2,tomorrow=$3,updated_at=NOW()`,
+      [date, merged.summary, merged.tomorrow]
+    );
+    return merged;
+  }
+
+  async getCalendarDays(): Promise<{ date: string; taskCount: number }[]> {
+    const rows = await query<any>(
+      `SELECT date, COUNT(*) as task_count FROM tasks WHERE archived=false GROUP BY date ORDER BY date DESC`
+    );
+    return rows.map(r => ({ date: r.date, taskCount: parseInt(r.task_count, 10) }));
+  }
+
+  // ── Chat Messages ────────────────────────────────────────────────────────────
+  async getChatMessages(limit = 50): Promise<ChatMessage[]> {
+    const rows = await query<any>(
+      `SELECT * FROM chat_messages ORDER BY created_at DESC LIMIT $1`, [limit]
+    );
+    return rows.reverse().map((r: any) => ({
+      id: r.id, userId: r.user_id, userName: r.user_name,
+      userRole: r.user_role, text: r.text,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+    }));
+  }
+
+  async addChatMessage(data: Omit<ChatMessage, 'id' | 'createdAt'>): Promise<ChatMessage> {
+    const rows = await query<any>(
+      `INSERT INTO chat_messages (id,user_id,user_name,user_role,text) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [`msg-${uuidv4()}`, data.userId, data.userName, data.userRole, data.text]
+    );
+    const r = rows[0];
+    return {
+      id: r.id, userId: r.user_id, userName: r.user_name,
+      userRole: r.user_role, text: r.text,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+    };
+  }
 
   getStats(): Record<string, number> {
     const active = this.getActiveTasks();
@@ -255,7 +252,6 @@ export class TaskStore {
   }
 }
 
-// Global singleton
 declare global { var __taskStore: TaskStore | undefined; }
 if (!global.__taskStore) global.__taskStore = new TaskStore();
 export const store = global.__taskStore;

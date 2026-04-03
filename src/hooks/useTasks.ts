@@ -1,50 +1,36 @@
 'use client';
 import { useState, useCallback } from 'react';
-import type { Task, TaskFilters, DashboardNotes } from '@/types';
+import type { Task, TaskFilters, DailyNotes } from '@/types';
 
 export function useTasks() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks]               = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
-  const [stats, setStats] = useState<Record<string, number>>({});
-  const [notes, setNotes] = useState<DashboardNotes>({ summary: '', tomorrow: '' });
-  const [loading, setLoading] = useState(false);
+  const [stats, setStats]               = useState<Record<string, number>>({});
+  const [loading, setLoading]           = useState(false);
 
   const fetchTasks = useCallback(async (filters: TaskFilters = {}) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filters.search) params.set('search', filters.search);
+      if (filters.search)   params.set('search',   filters.search);
       if (filters.priority) params.set('priority', filters.priority);
-      if (filters.status) params.set('status', filters.status);
+      if (filters.status)   params.set('status',   filters.status);
       if (filters.category) params.set('category', filters.category);
       if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
-      if (filters.dateTo) params.set('dateTo', filters.dateTo);
+      if (filters.dateTo)   params.set('dateTo',   filters.dateTo);
 
       const [activeRes, archivedRes] = await Promise.all([
         fetch(`/api/tasks?${params}`),
         fetch('/api/tasks?archived=true'),
       ]);
-
-      if (activeRes.ok) {
-        const data = await activeRes.json();
-        setTasks(data.tasks || []);
-        setStats(data.stats || {});
-        setNotes(data.notes || { summary: '', tomorrow: '' });
-      }
-      if (archivedRes.ok) {
-        const data = await archivedRes.json();
-        setArchivedTasks(data.tasks || []);
-      }
-    } finally {
-      setLoading(false);
-    }
+      if (activeRes.ok)   { const d = await activeRes.json();   setTasks(d.tasks || []);         setStats(d.stats || {}); }
+      if (archivedRes.ok) { const d = await archivedRes.json(); setArchivedTasks(d.tasks || []); }
+    } finally { setLoading(false); }
   }, []);
 
   const createTask = useCallback(async (data: Partial<Task>) => {
     const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error('Failed to create task');
     const { task } = await res.json();
@@ -53,27 +39,18 @@ export function useTasks() {
   }, []);
 
   const updateTask = useCallback(async (id: string, updates: Partial<Task> & { action?: string }) => {
-    // Optimistic update
     setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
     setArchivedTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
-
     const res = await fetch(`/api/tasks/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates),
     });
-    if (!res.ok) {
-      // Revert on failure — refetch
-      await fetchTasks();
-      throw new Error('Failed to update task');
-    }
+    if (!res.ok) { await fetchTasks(); throw new Error('Failed to update'); }
     const { task } = await res.json();
     setTasks(prev => prev.map(t => t.id === id ? task : t));
     return task as Task;
   }, [fetchTasks]);
 
   const deleteTask = useCallback(async (id: string) => {
-    // Optimistic
     setTasks(prev => prev.filter(t => t.id !== id));
     const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     if (!res.ok) { await fetchTasks(); throw new Error('Failed to delete'); }
@@ -95,36 +72,19 @@ export function useTasks() {
 
   const addComment = useCallback(async (taskId: string, text: string) => {
     const res = await fetch(`/api/tasks/${taskId}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
     });
     if (!res.ok) throw new Error('Failed to add comment');
     const { comment } = await res.json();
-    const updateComments = (list: Task[]) =>
-      list.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), comment] } : t);
-    setTasks(updateComments);
-    setArchivedTasks(updateComments);
+    const upd = (list: Task[]) => list.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), comment] } : t);
+    setTasks(upd); setArchivedTasks(upd);
     return comment;
   }, []);
 
-  const updateNotes = useCallback(async (updates: Partial<DashboardNotes>) => {
-    setNotes(prev => ({ ...prev, ...updates }));
-    await fetch('/api/notes', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-  }, []);
-
-  // Called when WS events arrive
   const applyWSEvent = useCallback((type: string, payload: any) => {
     switch (type) {
       case 'task_created':
-        setTasks(prev => {
-          if (prev.find(t => t.id === payload.id)) return prev;
-          return [payload, ...prev];
-        });
+        setTasks(prev => prev.find(t => t.id === payload.id) ? prev : [payload, ...prev]);
         break;
       case 'task_updated':
         if (payload.archived) {
@@ -146,22 +106,18 @@ export function useTasks() {
         setArchivedTasks(prev => prev.filter(t => t.id !== payload.id));
         break;
       case 'comment_added': {
-        const { taskId, comment } = payload;
-        const upd = (list: Task[]) => list.map(t => t.id === taskId
-          ? { ...t, comments: [...(t.comments || []), comment] } : t);
+        const upd = (list: Task[]) => list.map(t => t.id === payload.taskId
+          ? { ...t, comments: [...(t.comments || []), payload.comment] } : t);
         setTasks(upd); setArchivedTasks(upd);
         break;
       }
-      case 'notes_updated':
-        setNotes(payload);
-        break;
     }
   }, []);
 
   return {
-    tasks, archivedTasks, stats, notes, loading,
+    tasks, archivedTasks, stats, loading,
     fetchTasks, createTask, updateTask, deleteTask,
-    archiveTask, restoreTask, addComment, updateNotes, applyWSEvent,
+    archiveTask, restoreTask, addComment, applyWSEvent,
     setTasks, setArchivedTasks,
   };
 }

@@ -1,16 +1,15 @@
 import jwt from 'jsonwebtoken';
 import type { AuthPayload, User } from '../types';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-IN-PRODUCTION';
+export const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-before-production';
 export const JWT_EXPIRES = '12h';
 
-// Credentials come from environment variables — never hardcoded
 function getUsers(): Record<string, User & { password: string }> {
   return {
-    ceo: {
-      id: 'user-ceo',
-      name: 'Mr. Mohammad',
-      role: 'ceo',
+    mohammed: {
+      id: 'user-mohammed',
+      name: 'Mr. Mohammed',
+      role: 'mohammed',
       color: '#3b82f6',
       initials: 'MM',
       password: process.env.CEO_PASSWORD || 'ceo2026',
@@ -18,7 +17,7 @@ function getUsers(): Record<string, User & { password: string }> {
     darlene: {
       id: 'user-darlene',
       name: 'Darlene',
-      role: 'assistant',
+      role: 'darlene',
       color: '#f59e0b',
       initials: 'DA',
       password: process.env.ASSISTANT_PASSWORD || 'assist2026',
@@ -38,21 +37,16 @@ export function signToken(payload: Omit<AuthPayload, 'iat' | 'exp'>): string {
 }
 
 export function verifyToken(token: string): AuthPayload | null {
-  try {
-    return jwt.verify(token, JWT_SECRET) as AuthPayload;
-  } catch {
-    return null;
-  }
+  try { return jwt.verify(token, JWT_SECRET) as AuthPayload; }
+  catch { return null; }
 }
 
 export function authenticate(request: Request): AuthPayload | null {
   const cookieHeader = request.headers.get('cookie');
   if (!cookieHeader) return null;
   const match = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/);
-  const token = match?.[1];
-  if (!token) return null;
-  return verifyToken(token);
+  if (!match?.[1]) return null;
+  return verifyToken(match[1]);
 }
 
-// Export USERS for backwards compat
 export const USERS = getUsers();
